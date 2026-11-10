@@ -24,7 +24,12 @@ const TURN = {
   reason: 'answer',
 } as const
 
-const setUp = async ($: Engine, on: On, verdict: string) => {
+const setUp = async (
+  $: Engine,
+  on: On,
+  verdict: string,
+  { withGoal = true }: { withGoal?: boolean } = {},
+) => {
   const clock = mock.clock(on)
   const prompts: string[] = []
   let judgements = 0
@@ -63,13 +68,16 @@ const setUp = async ($: Engine, on: On, verdict: string) => {
   })
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  await $.command.run({
-    command: 'session-goal',
-    args: '로그인 버그 수정',
-    origin: { kind: 'composer' },
-    presentation: { isFullscreen: false, columns: 80 },
-  })
-  await clock.advance(0)
+
+  if (withGoal) {
+    await $.command.run({
+      command: 'session-goal',
+      args: '로그인 버그 수정',
+      origin: { kind: 'composer' },
+      presentation: { isFullscreen: false, columns: 80 },
+    })
+    await clock.advance(0)
+  }
 
   return {
     clock,
@@ -172,5 +180,68 @@ test('without a handoff block the new session opens empty', async ($, on) => {
 
   await ui.press({ key: 'new-session' })
   expect(prompts).toContain('open: open claude://code/new?source=desktop_action')
+  await ui.unmount()
+})
+
+test('without a goal the first answered turn suggests one from the chat', async ($, on) => {
+  const { clock, prompts, judgements } = await setUp($, on, 'GOAL: 결제 오류 수정', {
+    withGoal: false,
+  })
+
+  await $.turn.complete(TURN)
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+
+  const ui = await $.ui.mount(BAND)
+
+  expect((await ui.find({ type: 'Text', text: /추정 목표/ }))?.text).toContain('결제 오류')
+  await ui.press({ key: 'accept' })
+  await clock.advance(0)
+  expect(prompts[0]).toContain('목표: 결제 오류 수정')
+  expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
+  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('결제 오류')
+  await ui.unmount()
+})
+
+test('the suggestion runs once per session and skipping hides the hint', async ($, on) => {
+  // Stands for the engine's own band once the mod draws nothing.
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return <Text>engine</Text>
+  })
+
+  const { clock, judgements } = await setUp($, on, 'GOAL: 결제 오류 수정', {
+    withGoal: false,
+  })
+
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+
+  const ui = await $.ui.mount(BAND)
+
+  await ui.press({ key: 'skip' })
+  expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /목표가 없습니다/ })).toBe(undefined)
+  expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+  await ui.unmount()
+})
+
+test('a NONE reply keeps the plain hint', async ($, on) => {
+  const { clock, judgements } = await setUp($, on, 'NONE', { withGoal: false })
+
+  await $.turn.complete(TURN)
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /목표가 없습니다/ })).not.toBe(undefined)
   await ui.unmount()
 })

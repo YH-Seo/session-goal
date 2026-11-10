@@ -15,6 +15,10 @@ declare module 'claude-code' {
       goal: Goal | null
       isHintHidden: boolean
       skipNextJudgement: boolean
+      /** Goal inferred from the conversation, offered in the band until set or skipped. */
+      suggestion: string | null
+      /** The one inference per session has run (or been skipped). */
+      hasSuggested: boolean
     }
   }
 }

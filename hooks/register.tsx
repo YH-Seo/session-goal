@@ -12,6 +12,14 @@ const skipNextJudgement = atom(
   { plugin: 'session-goal', key: 'skipNextJudgement' } as const,
   false,
 )
+const suggestion = atom(
+  { plugin: 'session-goal', key: 'suggestion' } as const,
+  null,
+)
+const hasSuggested = atom(
+  { plugin: 'session-goal', key: 'hasSuggested' } as const,
+  false,
+)
 
 const titleOf = (text: string) =>
   text.length > 40 ? `${text.slice(0, 40)}…` : text
@@ -57,6 +65,36 @@ const judge = async ($: EngineInterface, target: Goal) => {
   )
 }
 
+const suggestPrompt = [
+  '[session-goal 추정] 이 메시지는 자동 추정입니다. 작업을 이어 가지 말고 답만 하세요.',
+  '지금까지의 대화에서 사용자가 이 세션에서 이루려는 목표를 추정하세요.',
+  '목표가 분명하면 첫 줄에 `GOAL: <목표와 완료 조건을 담은 한 문장>`만 쓰세요.',
+  '대화가 짧거나 단순 질문이라 목표를 알 수 없으면 `NONE`만 쓰세요.',
+].join('\n')
+
+export const parseSuggestedGoal = (reply: string) => {
+  const line = reply.trim().split('\n')[0] ?? ''
+  const match = /^GOAL\s*:\s*(.+)$/.exec(line)
+
+  return match?.[1]?.trim() ?? null
+}
+
+const suggest = async ($: EngineInterface) => {
+  const reply = await $.model.fork({ prompt: suggestPrompt })
+
+  if (!reply.isAnswered) {
+    return
+  }
+
+  const text = parseSuggestedGoal(reply.text)
+
+  if (text === null || (await read($, goal)) !== null) {
+    return
+  }
+
+  await update($, suggestion, () => text)
+}
+
 const askClaude = ($: EngineInterface, text: string) => {
   // A command.run hook may not submit a prompt: the host would deadlock on it.
   void $.clock.after(0, () => {
@@ -68,6 +106,7 @@ const askClaude = ($: EngineInterface, text: string) => {
 
 const setGoal = async ($: EngineInterface, text: string) => {
   await update($, goal, () => ({ text, status: 'active' }))
+  await update($, suggestion, () => null)
   await update($, skipNextJudgement, () => true)
   askClaude(
     $,
@@ -148,6 +187,7 @@ export const register: Register = on => {
 
     if (text === 'clear') {
       await update($, goal, () => null)
+      await update($, suggestion, () => null)
 
       return { text: '세션 목표를 해제했습니다.' }
     }
@@ -218,6 +258,19 @@ export const register: Register = on => {
       })
     }
 
+    if (
+      e.reason === 'answer' &&
+      current === null &&
+      !(await read($, hasSuggested)) &&
+      !(await read($, isHintHidden))
+    ) {
+      // One extra model call per session: the first answered turn without a goal.
+      await update($, hasSuggested, () => true)
+      void $.clock.after(0, () => {
+        void suggest($)
+      })
+    }
+
     return result
   })
 
@@ -232,6 +285,34 @@ export const register: Register = on => {
     if (current === null) {
       if (await read($, isHintHidden)) {
         return next(e)
+      }
+
+      const suggested = await read($, suggestion)
+
+      if (suggested !== null) {
+        return (
+          <Box flexDirection="column">
+            <Text>추정 목표: {suggested}</Text>
+            <Text dimColor>
+              대화를 보고 추정한 목표입니다. 다르면 /session-goal &lt;목표&gt;로 직접 설정하세요.
+            </Text>
+            <Box>
+              <Button
+                key="accept"
+                label="이 목표로 설정"
+                onPress={() => setGoal($, suggested)}
+              />
+              <Button
+                key="skip"
+                label="건너뛰기"
+                onPress={async () => {
+                  await update($, suggestion, () => null)
+                  await update($, isHintHidden, () => true)
+                }}
+              />
+            </Box>
+          </Box>
+        )
       }
 
       return (

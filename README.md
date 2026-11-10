@@ -27,6 +27,8 @@ claude plugin install session-goal --marketplace YH-Seo/session-goal
 | `/session-goal clear` | Clears the goal |
 | `/session-done` | Marks the goal done and renames the session to `[완료] ...` |
 
+When a session has no goal, the first answered turn makes one extra model call that reads the conversation and infers a goal. The band above the prompt then shows `추정 목표: ...` with a button to set it as the session goal and one to skip. If the conversation is too short to tell, the band keeps the plain hint. This runs once per session.
+
 After each answered turn, one extra model call reads the conversation and judges the goal. When it looks met, the band above the prompt shows the reason with two buttons: finish and open a new session, or reject the verdict.
 
 When you finish, Claude writes a handoff prompt in a ```` ```handoff ```` block. The new session opens with that prompt already in its input box (`claude://code/new?q=...`), so you only press send. With no block, the new session opens empty.
@@ -34,6 +36,7 @@ When you finish, Claude writes a handoff prompt in a ```` ```handoff ```` block.
 ## Limits
 
 - Opening a new session uses the `claude://code/new` link through macOS `open`, so that button works on macOS with the Claude desktop app only.
+- The goal inference adds one model call per session that starts without a goal.
 - The automatic judgement adds one model call per turn in sessions that have a goal.
 - The handoff is cut at 4,000 characters to keep the link short.
 - The UI text is in Korean.

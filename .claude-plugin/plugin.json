@@ -1,6 +1,6 @@
 {
   "name": "session-goal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Set a session goal, judge completion after each turn without forcing more work, and nudge toward a new session.",
   "types": "./types/index.d.ts"
 }
