@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Goal } from '../types'
 
@@ -352,6 +352,43 @@ export const register: Register = on => {
     const current = await read($, goal)
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // One look for every state: a rounded card whose border and badge take
+    // the state's colour, the goal as its title, buttons along the bottom.
+    const card = (look: {
+      key: string
+      tone: string
+      badge: string
+      title: string
+      note?: string
+      buttons: RenderChildren
+    }) => (
+      <Box
+        key={look.key}
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={look.tone}
+        paddingX="md"
+        paddingY="xs"
+        gap="xs"
+        hover={{ borderStyle: 'bold' }}
+      >
+        <Text color={look.tone} size="footnote" weight="semibold">
+          {look.badge}
+        </Text>
+        <Text size="heading" weight="semibold" wrap="wrap">
+          {look.title}
+        </Text>
+        {look.note ? (
+          <Text dimColor size="footnote" wrap="wrap">
+            {look.note}
+          </Text>
+        ) : null}
+        <Box gap="sm" flexWrap="wrap">
+          {look.buttons}
+        </Box>
+      </Box>
+    )
+
     if (current === null) {
       if (await read($, isHintHidden)) {
         return next(e)
@@ -360,102 +397,121 @@ export const register: Register = on => {
       const suggested = await read($, suggestion)
 
       if (suggested !== null) {
-        return (
-          <Box flexDirection="column">
-            <Text>추정 목표: {suggested}</Text>
-            <Text dimColor>
-              대화를 보고 추정한 목표입니다. 다르면 /session-goal &lt;목표&gt;로 직접 설정하세요.
-            </Text>
-            <Box>
-              <Button
-                key="accept"
-                label="이 목표로 설정"
-                onPress={() => setGoal($, suggested)}
-              />
-              <Button
-                key="skip"
-                label="건너뛰기"
-                onPress={async () => {
-                  await update($, suggestion, () => null)
-                  await hideHint($)
-                }}
-              />
-            </Box>
-          </Box>
-        )
+        return card({
+          key: 'card-suggested',
+          tone: 'suggestion',
+          badge: '✦ 추정 목표',
+          title: suggested,
+          note: '대화를 보고 추정한 목표입니다. 다르면 /session-goal <목표>로 직접 설정하세요.',
+          buttons: [
+            <Button
+              key="accept"
+              variant="primary"
+              label="이 목표로 설정"
+              onPress={() => setGoal($, suggested)}
+            />,
+            <Button
+              key="skip"
+              variant="secondary"
+              label="건너뛰기"
+              onPress={async () => {
+                await update($, suggestion, () => null)
+                await hideHint($)
+              }}
+            />,
+          ],
+        })
       }
 
-      return (
-        <Box>
-          <Text dimColor>
-            이 세션의 목표가 없습니다. /session-goal &lt;목표&gt;로 설정하세요.{' '}
-          </Text>
+      return card({
+        key: 'card-empty',
+        tone: 'subtle',
+        badge: '◎ 세션 목표 없음',
+        title: '이 세션에서 끝낼 일을 정해 두세요',
+        note: '/session-goal <목표와 완료 조건>으로 설정합니다.',
+        buttons: [
           <Button
             key="skip"
+            variant="secondary"
             label="건너뛰기"
             onPress={() => hideHint($)}
-          />
-        </Box>
-      )
+          />,
+        ],
+      })
     }
 
     if (current.status === 'done') {
-      return (
-        <Box>
-          <Text dimColor>목표 완료: {current.text} </Text>
+      return card({
+        key: 'card-done',
+        tone: 'merged',
+        badge: '★ 목표 완료',
+        title: current.text,
+        note: current.handoff
+          ? '인계 내용을 채워 새 세션을 엽니다.'
+          : undefined,
+        buttons: [
           <Button
             key="new-session"
+            variant="primary"
             label={current.handoff ? '인계해서 새 세션 열기' : '새 세션 열기'}
             onPress={() => openNewSession($, current.handoff || undefined)}
-          />
-        </Box>
-      )
+          />,
+        ],
+      })
     }
 
     if (current.status === 'met') {
-      return (
-        <Box flexDirection="column">
-          <Text bold>목표를 달성한 것으로 보입니다: {current.text}</Text>
-          <Text dimColor>{current.reason}</Text>
-          <Box>
-            <Button
-              key="finish"
-              label="완료하고 새 세션으로"
-              onPress={async () => {
-                // Opens once Claude has written the handoff (turn.complete).
-                await finishGoal($, current, true)
-              }}
-            />
-            <Button
-              key="finish-only"
-              label="완료만"
-              onPress={() => finishGoal($, current)}
-            />
-            <Button
-              key="reject"
-              label="아직 아닙니다"
-              onPress={() =>
-                changeGoal($, () => ({
-                  text: current.text,
-                  status: 'active' as const,
-                  isRejected: true,
-                }))
-              }
-            />
-          </Box>
-        </Box>
-      )
+      return card({
+        key: 'card-met',
+        tone: 'success',
+        badge: '✓ 달성한 것으로 보입니다',
+        title: current.text,
+        note: current.reason,
+        buttons: [
+          <Button
+            key="finish"
+            variant="primary"
+            label="완료하고 새 세션으로"
+            onPress={async () => {
+              // Opens once Claude has written the handoff (turn.complete).
+              await finishGoal($, current, true)
+            }}
+          />,
+          <Button
+            key="finish-only"
+            variant="secondary"
+            label="완료만"
+            onPress={() => finishGoal($, current)}
+          />,
+          <Button
+            key="reject"
+            variant="secondary"
+            label="아직 아닙니다"
+            onPress={() =>
+              changeGoal($, () => ({
+                text: current.text,
+                status: 'active' as const,
+                isRejected: true,
+              }))
+            }
+          />,
+        ],
+      })
     }
 
-    return (
-      <Box>
-        <Text>목표: {current.text} </Text>
+    return card({
+      key: 'card-active',
+      tone: 'claude',
+      badge: current.isRejected ? '● 진행 중 · 재판정 대기' : '● 진행 중',
+      title: current.text,
+      buttons: [
         <Button
           key="done"
+          variant="secondary"
           label="완료"
           onPress={() => finishGoal($, current)}
-        />
-      </Box>
-    )
+        />,
+      ],
+    })
   })
 }
