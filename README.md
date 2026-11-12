@@ -39,4 +39,5 @@ When you finish, Claude writes a handoff prompt in a ```` ```handoff ```` block.
 - The goal inference adds one model call per session that starts without a goal.
 - The automatic judgement adds one model call per turn in sessions that have a goal.
 - The handoff is cut at 4,000 characters to keep the link short.
+- The goal of each session is kept in the mod's store (at most 200 sessions), so it comes back after the app restarts.
 - The UI text is in Korean.

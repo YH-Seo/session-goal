@@ -28,9 +28,15 @@ const setUp = async (
   $: Engine,
   on: On,
   verdict: string,
-  { withGoal = true }: { withGoal?: boolean } = {},
+  {
+    withGoal = true,
+    stored = {},
+  }: { withGoal?: boolean; stored?: Record<string, unknown> } = {},
 ) => {
   const clock = mock.clock(on)
+
+  mock.store(on, stored)
+  on('session.id', () => ({ value: 'sess-1' }))
   const prompts: string[] = []
   let judgements = 0
   let answer = ''
@@ -243,5 +249,41 @@ test('a NONE reply keeps the plain hint', async ($, on) => {
 
   expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
   expect(await ui.find({ type: 'Text', text: /목표가 없습니다/ })).not.toBe(undefined)
+  await ui.unmount()
+})
+
+test('a goal set before an app restart comes back and no goal is suggested', async ($, on) => {
+  const { clock, judgements } = await setUp($, on, 'GOAL: 결제 오류 수정', {
+    withGoal: false,
+    stored: {
+      'session:sess-1': {
+        goal: { text: '로그인 버그 수정', status: 'active' },
+        isHintHidden: false,
+        hasSuggested: false,
+      },
+    },
+  })
+
+  await $.turn.complete(TURN)
+  await clock.advance(0)
+  // The one model call judges the restored goal; it does not suggest a new one.
+  expect(judgements()).toBe(1)
+
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
+  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인 버그')
+  await ui.unmount()
+})
+
+test('setting a goal saves it for the next start of the session', async ($, on) => {
+  const { clock } = await setUp($, on, 'NOT_MET: no')
+
+  await clock.advance(0)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount(BAND)
+
+  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인 버그')
   await ui.unmount()
 })

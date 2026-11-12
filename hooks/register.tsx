@@ -21,6 +21,74 @@ const hasSuggested = atom(
   false,
 )
 
+// $.state lives only while the app runs; mirror what must outlast a restart.
+type Saved = { goal: Goal | null; isHintHidden: boolean; hasSuggested: boolean }
+
+const STORE_PREFIX = 'session:'
+const MAX_SAVED_SESSIONS = 200
+
+const storeKey = async ($: EngineInterface) =>
+  `${STORE_PREFIX}${await $.session.id()}`
+
+const save = async ($: EngineInterface) => {
+  const snapshot: Saved = {
+    goal: await read($, goal),
+    isHintHidden: await read($, isHintHidden),
+    hasSuggested: await read($, hasSuggested),
+  }
+
+  try {
+    await $.store.set(await storeKey($), snapshot)
+  } catch (error) {
+    $.ui.toast(`session-goal: 목표를 저장하지 못했습니다. ${String(error)}`)
+  }
+}
+
+const changeGoal = async (
+  $: EngineInterface,
+  fn: (current: Goal | null) => Goal | null,
+) => {
+  await update($, goal, fn)
+  await save($)
+}
+
+const hideHint = async ($: EngineInterface) => {
+  await update($, isHintHidden, () => true)
+  await save($)
+}
+
+const markSuggested = async ($: EngineInterface) => {
+  await update($, hasSuggested, () => true)
+  await save($)
+}
+
+const isSaved = (value: unknown): value is Saved =>
+  typeof value === 'object' &&
+  value !== null &&
+  'goal' in value &&
+  'isHintHidden' in value &&
+  'hasSuggested' in value
+
+const restore = async ($: EngineInterface) => {
+  const saved = await $.store.get(await storeKey($))
+
+  if (isSaved(saved)) {
+    await update($, goal, () => saved.goal)
+    await update($, isHintHidden, () => saved.isHintHidden)
+    await update($, hasSuggested, () => saved.hasSuggested)
+
+    if (saved.goal !== null) {
+      await update($, suggestion, () => null)
+    }
+  }
+
+  const keys = (await $.store.keys()).filter(key => key.startsWith(STORE_PREFIX))
+
+  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SAVED_SESSIONS))) {
+    await $.store.delete(key)
+  }
+}
+
 const titleOf = (text: string) =>
   text.length > 40 ? `${text.slice(0, 40)}…` : text
 
@@ -58,7 +126,7 @@ const judge = async ($: EngineInterface, target: Goal) => {
     return
   }
 
-  await update($, goal, current =>
+  await changeGoal($, current =>
     current?.text === target.text && current.status === 'active'
       ? { ...current, status: 'met' as const, reason }
       : current,
@@ -105,7 +173,7 @@ const askClaude = ($: EngineInterface, text: string) => {
 }
 
 const setGoal = async ($: EngineInterface, text: string) => {
-  await update($, goal, () => ({ text, status: 'active' }))
+  await changeGoal($, () => ({ text, status: 'active' }))
   await update($, suggestion, () => null)
   await update($, skipNextJudgement, () => true)
   askClaude(
@@ -123,7 +191,7 @@ const finishGoal = async (
   target: Goal,
   isOpenPending = false,
 ) => {
-  await update($, goal, () => ({
+  await changeGoal($, () => ({
     ...target,
     status: 'done' as const,
     isOpenPending,
@@ -169,6 +237,8 @@ const openNewSession = async ($: EngineInterface, handoff?: string) => {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // A failed restore must not keep the commands from registering.
+    await restore($).catch(() => undefined)
     await $.command.register({
       name: 'session-goal',
       description: '이 세션의 목표를 설정합니다 (clear로 해제)',
@@ -186,7 +256,7 @@ export const register: Register = on => {
     const text = e.args.trim()
 
     if (text === 'clear') {
-      await update($, goal, () => null)
+      await changeGoal($, () => null)
       await update($, suggestion, () => null)
 
       return { text: '세션 목표를 해제했습니다.' }
@@ -232,7 +302,7 @@ export const register: Register = on => {
       const handoff = parseHandoff(result.text)
 
       if (handoff !== null || finished.isOpenPending) {
-        await update($, goal, current =>
+        await changeGoal($, current =>
           current === null
             ? current
             : { ...current, handoff: handoff ?? '', isOpenPending: false },
@@ -265,7 +335,7 @@ export const register: Register = on => {
       !(await read($, isHintHidden))
     ) {
       // One extra model call per session: the first answered turn without a goal.
-      await update($, hasSuggested, () => true)
+      await markSuggested($)
       void $.clock.after(0, () => {
         void suggest($)
       })
@@ -307,7 +377,7 @@ export const register: Register = on => {
                 label="건너뛰기"
                 onPress={async () => {
                   await update($, suggestion, () => null)
-                  await update($, isHintHidden, () => true)
+                  await hideHint($)
                 }}
               />
             </Box>
@@ -323,7 +393,7 @@ export const register: Register = on => {
           <Button
             key="skip"
             label="건너뛰기"
-            onPress={() => update($, isHintHidden, () => true)}
+            onPress={() => hideHint($)}
           />
         </Box>
       )
@@ -360,7 +430,7 @@ export const register: Register = on => {
               key="reject"
               label="아직 아닙니다"
               onPress={() =>
-                update($, goal, () => ({
+                changeGoal($, () => ({
                   text: current.text,
                   status: 'active' as const,
                   isRejected: true,
