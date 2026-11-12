@@ -427,6 +427,11 @@ export const register: Register = on => {
               }}
             />
             <Button
+              key="finish-only"
+              label="완료만"
+              onPress={() => finishGoal($, current)}
+            />
+            <Button
               key="reject"
               label="아직 아닙니다"
               onPress={() =>

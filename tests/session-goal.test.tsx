@@ -287,3 +287,25 @@ test('setting a goal saves it for the next start of the session', async ($, on) 
   expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인 버그')
   await ui.unmount()
 })
+
+test('finishing only marks the goal done and opens no session', async ($, on) => {
+  const { clock, prompts, answerWith } = await setUp($, on, 'MET: fixed')
+
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(0)
+
+  const ui = await $.ui.mount(BAND)
+
+  await ui.press({ key: 'finish-only' })
+  await clock.advance(0)
+  expect(prompts.some(text => text.includes('[완료]'))).toBe(true)
+
+  answerWith('정리했습니다.\n\n```handoff\n남은 일: 배포 확인\n```\n')
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.advance(0)
+  expect(prompts.some(text => text.startsWith('open:'))).toBe(false)
+  expect((await ui.find({ type: 'Text', text: /목표 완료/ }))?.text).toContain('로그인')
+  expect(await ui.find({ key: 'new-session' })).not.toBe(undefined)
+  await ui.unmount()
+})
