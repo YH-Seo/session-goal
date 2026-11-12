@@ -8,6 +8,7 @@ const BAND = {
   surface: 'desktop',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 10,
     bodyColumns: 80,
@@ -126,7 +127,8 @@ test('a MET verdict offers a new session and starts no work', async ($, on) => {
 
   const ui = await $.ui.mount(BAND)
 
-  expect((await ui.find({ type: 'Text', text: /달성/ }))?.text).toContain('로그인')
+  expect(await ui.find({ type: 'Text', text: /달성/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인/ })).not.toBe(undefined)
   await ui.press({ key: 'finish' })
   await clock.advance(0)
   expect(prompts.some(text => text.startsWith('open:'))).toBe(false)
@@ -150,7 +152,8 @@ test('a NOT_MET verdict keeps the goal active', async ($, on) => {
 
   const ui = await $.ui.mount(BAND)
 
-  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인')
+  expect(await ui.find({ type: 'Text', text: /진행 중/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인/ })).not.toBe(undefined)
   expect(await ui.find({ type: 'Text', text: /달성/ })).toBe(undefined)
   await ui.unmount()
 })
@@ -200,12 +203,14 @@ test('without a goal the first answered turn suggests one from the chat', async 
 
   const ui = await $.ui.mount(BAND)
 
-  expect((await ui.find({ type: 'Text', text: /추정 목표/ }))?.text).toContain('결제 오류')
+  expect(await ui.find({ type: 'Text', text: /추정 목표/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /결제 오류/ })).not.toBe(undefined)
   await ui.press({ key: 'accept' })
   await clock.advance(0)
   expect(prompts[0]).toContain('목표: 결제 오류 수정')
   expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
-  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('결제 오류')
+  expect(await ui.find({ type: 'Text', text: /진행 중/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /결제 오류/ })).not.toBe(undefined)
   await ui.unmount()
 })
 
@@ -230,7 +235,7 @@ test('the suggestion runs once per session and skipping hides the hint', async (
 
   await ui.press({ key: 'skip' })
   expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
-  expect(await ui.find({ type: 'Text', text: /목표가 없습니다/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /세션 목표 없음/ })).toBe(undefined)
   expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
   await $.turn.complete({ ...TURN, turnId: 't3' })
   await clock.advance(0)
@@ -248,7 +253,7 @@ test('a NONE reply keeps the plain hint', async ($, on) => {
   const ui = await $.ui.mount(BAND)
 
   expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
-  expect(await ui.find({ type: 'Text', text: /목표가 없습니다/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /세션 목표 없음/ })).not.toBe(undefined)
   await ui.unmount()
 })
 
@@ -272,7 +277,8 @@ test('a goal set before an app restart comes back and no goal is suggested', asy
   const ui = await $.ui.mount(BAND)
 
   expect(await ui.find({ type: 'Text', text: /추정 목표/ })).toBe(undefined)
-  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인 버그')
+  expect(await ui.find({ type: 'Text', text: /진행 중/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인 버그/ })).not.toBe(undefined)
   await ui.unmount()
 })
 
@@ -284,7 +290,8 @@ test('setting a goal saves it for the next start of the session', async ($, on) 
 
   const ui = await $.ui.mount(BAND)
 
-  expect((await ui.find({ type: 'Text', text: /목표:/ }))?.text).toContain('로그인 버그')
+  expect(await ui.find({ type: 'Text', text: /진행 중/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인 버그/ })).not.toBe(undefined)
   await ui.unmount()
 })
 
@@ -305,7 +312,8 @@ test('finishing only marks the goal done and opens no session', async ($, on) =>
   await $.turn.complete({ ...TURN, turnId: 't3' })
   await clock.advance(0)
   expect(prompts.some(text => text.startsWith('open:'))).toBe(false)
-  expect((await ui.find({ type: 'Text', text: /목표 완료/ }))?.text).toContain('로그인')
+  expect(await ui.find({ type: 'Text', text: /목표 완료/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인/ })).not.toBe(undefined)
   expect(await ui.find({ key: 'new-session' })).not.toBe(undefined)
   await ui.unmount()
 })
