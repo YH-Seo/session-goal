@@ -358,7 +358,12 @@ test('clearing the goal removes its stored row', async ($, on) => {
   const { store } = await setUp($, on, 'NOT_MET: no')
 
   expect(store.has('session:sess-1')).toBe(true)
-  await $.command.run({ command: 'session-goal', args: 'clear' })
+  await $.command.run({
+    command: 'session-goal',
+    args: 'clear',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 80 },
+  })
   expect(store.has('session:sess-1')).toBe(false)
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
