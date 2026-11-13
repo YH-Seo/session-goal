@@ -22,10 +22,21 @@ const hasSuggested = atom(
 )
 
 // $.state lives only while the app runs; mirror what must outlast a restart.
-type Saved = { goal: Goal | null; isHintHidden: boolean; hasSuggested: boolean }
+type Saved = {
+  goal: Goal | null
+  isHintHidden: boolean
+  hasSuggested: boolean
+  /** When this row was last written (ms since the epoch); absent before 0.5.0. */
+  updatedAt?: number
+}
 
 const STORE_PREFIX = 'session:'
-const MAX_SAVED_SESSIONS = 200
+// A done goal stays so the finished card (reason, handoff, new-session
+// button) is still there when the session is reopened; only `/session-goal
+// clear` removes a row on purpose. Rows of sessions nobody touched for this
+// long are dropped at the next start, which keeps the store small without
+// ever losing a card someone could come back to.
+const KEEP_FOR_MS = 90 * 24 * 60 * 60 * 1000
 
 const storeKey = async ($: EngineInterface) =>
   `${STORE_PREFIX}${await $.session.id()}`
@@ -35,6 +46,7 @@ const save = async ($: EngineInterface) => {
     goal: await read($, goal),
     isHintHidden: await read($, isHintHidden),
     hasSuggested: await read($, hasSuggested),
+    updatedAt: await $.clock.now(),
   }
 
   try {
@@ -50,6 +62,17 @@ const changeGoal = async (
 ) => {
   await update($, goal, fn)
   await save($)
+}
+
+const forgetGoal = async ($: EngineInterface) => {
+  await update($, goal, () => null)
+  await update($, suggestion, () => null)
+
+  try {
+    await $.store.delete(await storeKey($))
+  } catch (error) {
+    $.ui.toast(`session-goal: 저장된 목표를 지우지 못했습니다. ${String(error)}`)
+  }
 }
 
 const hideHint = async ($: EngineInterface) => {
@@ -82,10 +105,25 @@ const restore = async ($: EngineInterface) => {
     }
   }
 
-  const keys = (await $.store.keys()).filter(key => key.startsWith(STORE_PREFIX))
+  const own = await storeKey($)
+  const now = await $.clock.now()
 
-  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SAVED_SESSIONS))) {
-    await $.store.delete(key)
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith(STORE_PREFIX) || key === own) {
+      continue
+    }
+
+    const other = await $.store.get(key)
+    // A row without a stamp predates 0.5.0; it is stamped by its own
+    // session's next save and judged from then on.
+    const isStale =
+      isSaved(other) &&
+      typeof other.updatedAt === 'number' &&
+      now - other.updatedAt > KEEP_FOR_MS
+
+    if (isStale || !isSaved(other)) {
+      await $.store.delete(key)
+    }
   }
 }
 
@@ -256,8 +294,7 @@ export const register: Register = on => {
     const text = e.args.trim()
 
     if (text === 'clear') {
-      await changeGoal($, () => null)
-      await update($, suggestion, () => null)
+      await forgetGoal($)
 
       return { text: '세션 목표를 해제했습니다.' }
     }

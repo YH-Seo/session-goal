@@ -35,8 +35,21 @@ const setUp = async (
   }: { withGoal?: boolean; stored?: Record<string, unknown> } = {},
 ) => {
   const clock = mock.clock(on)
+  // The test's own store, so a test can look at what the plugin left in it.
+  const store = new Map<string, unknown>(Object.entries(stored))
 
-  mock.store(on, stored)
+  on('store.get', (_, e) => ({ value: store.get(e.key) }))
+  on('store.set', (_, e) => {
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    store.delete(e.key)
+
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
   on('session.id', () => ({ value: 'sess-1' }))
   const prompts: string[] = []
   let judgements = 0
@@ -87,6 +100,7 @@ const setUp = async (
   }
 
   return {
+    store,
     clock,
     prompts,
     judgements: () => judgements,
@@ -316,4 +330,88 @@ test('finishing only marks the goal done and opens no session', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /로그인/ })).not.toBe(undefined)
   expect(await ui.find({ key: 'new-session' })).not.toBe(undefined)
   await ui.unmount()
+})
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+test('a finished goal survives an app restart with its card', async ($, on) => {
+  await setUp($, on, 'NOT_MET: no', {
+    withGoal: false,
+    stored: {
+      'session:sess-1': {
+        goal: { text: '로그인 버그 수정', status: 'done', handoff: '남은 일: 배포 확인' },
+        isHintHidden: false,
+        hasSuggested: true,
+        updatedAt: 0,
+      },
+    },
+  })
+
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /목표 완료/ })).not.toBe(undefined)
+  expect(await ui.find({ key: 'new-session' })).not.toBe(undefined)
+  await ui.unmount()
+})
+
+test('clearing the goal removes its stored row', async ($, on) => {
+  const { store } = await setUp($, on, 'NOT_MET: no')
+
+  expect(store.has('session:sess-1')).toBe(true)
+  await $.command.run({
+    command: 'session-goal',
+    args: 'clear',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 80 },
+  })
+  expect(store.has('session:sess-1')).toBe(false)
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /세션 목표 없음/ })).not.toBe(undefined)
+  await ui.unmount()
+})
+
+test('a start drops rows of sessions untouched for 90 days and keeps the rest', async ($, on) => {
+  const { clock, store } = await setUp($, on, 'NOT_MET: no', {
+    withGoal: false,
+    stored: {
+      'session:old': {
+        goal: { text: '옛 목표', status: 'done' },
+        isHintHidden: false,
+        hasSuggested: true,
+        updatedAt: 0,
+      },
+      'session:recent': {
+        goal: { text: '최근 목표', status: 'active' },
+        isHintHidden: false,
+        hasSuggested: true,
+        updatedAt: 0,
+      },
+      'session:unstamped': {
+        goal: { text: '0.4.0 목표', status: 'active' },
+        isHintHidden: false,
+        hasSuggested: true,
+      },
+      'session:broken': 'not a row',
+    },
+  })
+
+  await clock.advance(91 * DAY_MS)
+  store.set('session:recent', {
+    goal: { text: '최근 목표', status: 'active' },
+    isHintHidden: false,
+    hasSuggested: true,
+    updatedAt: clock.now(),
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  const keys = [...store.keys()]
+
+  expect(keys).not.toContain('session:old')
+  expect(keys).not.toContain('session:broken')
+  expect(keys).toContain('session:recent')
+  expect(keys).toContain('session:unstamped')
 })

@@ -33,6 +33,10 @@ After each answered turn, one extra model call reads the conversation and judges
 
 When you finish, Claude writes a handoff prompt in a ```` ```handoff ```` block. The new session opens with that prompt already in its input box (`claude://code/new?q=...`), so you only press send. With no block, the new session opens empty.
 
+## Across restarts
+
+The goal is kept in the plugin's own store under the session's id, so it comes back when the app restarts or the session is resumed. A finished goal is kept too, card and handoff included, so you can still open the next session from it later. `/session-goal clear` is the only thing that removes a session's row on purpose; rows of sessions untouched for 90 days are dropped at the next start.
+
 ## Limits
 
 - Opening a new session uses the `claude://code/new` link through macOS `open`, so that button works on macOS with the Claude desktop app only.
