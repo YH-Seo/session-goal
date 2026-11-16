@@ -7,6 +7,15 @@ export type Goal = {
   handoff?: string
   /** Open the new session as soon as the handoff turn ends. */
   isOpenPending?: boolean
+  /** A different goal the judgement recommends, waiting for keep or change. */
+  proposal?: GoalProposal
+  /** The last proposal the person declined by keeping this goal. */
+  keptAgainst?: string
+}
+
+export type GoalProposal = {
+  text: string
+  reason: string
 }
 
 declare module 'claude-code' {

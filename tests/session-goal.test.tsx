@@ -68,8 +68,11 @@ const setUp = async (
     return { text: e.text }
   })
   on('turn.complete', () => ({ text: answer }))
-  on('model.fork', () => {
+  const forks: string[] = []
+
+  on('model.fork', (_, e) => {
     judgements += 1
+    forks.push(e.prompt)
 
     return { value: { isAnswered: true, text: verdict, usage: USAGE } }
   })
@@ -90,6 +93,7 @@ const setUp = async (
     clock,
     prompts,
     judgements: () => judgements,
+    forks,
     answerWith: (text: string) => {
       answer = text
     },
@@ -315,5 +319,52 @@ test('finishing only marks the goal done and opens no session', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /목표 완료/ })).not.toBe(undefined)
   expect(await ui.find({ type: 'Text', text: /로그인/ })).not.toBe(undefined)
   expect(await ui.find({ key: 'new-session' })).not.toBe(undefined)
+  await ui.unmount()
+})
+
+const CHANGE = 'CHANGE: 결제 오류 수정\nREASON: 대화가 결제 쪽으로 옮겨 갔습니다.'
+
+test('a CHANGE verdict offers to keep or change the goal, and change sets it', async ($, on) => {
+  const { clock, prompts } = await setUp($, on, CHANGE)
+
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(0)
+
+  const ui = await $.ui.mount(BAND)
+
+  expect(await ui.find({ type: 'Text', text: /목표 변경 제안/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /결제 오류 수정/ })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /기존 목표: 로그인/ })).not.toBe(undefined)
+  expect(await ui.find({ key: 'keep-goal' })).not.toBe(undefined)
+  await ui.press({ key: 'change-goal' })
+  await clock.advance(0)
+  expect(prompts.some(text => text.includes('목표: 결제 오류 수정'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /목표 변경 제안/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /진행 중/ })).not.toBe(undefined)
+  await ui.unmount()
+})
+
+test('keeping the goal hides the proposal and tells the next judgement', async ($, on) => {
+  const { clock, judgements, forks } = await setUp($, on, CHANGE)
+
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(0)
+  // A waiting proposal is not judged again.
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+
+  const ui = await $.ui.mount(BAND)
+
+  await ui.press({ key: 'keep-goal' })
+  expect(await ui.find({ type: 'Text', text: /목표 변경 제안/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /로그인 버그/ })).not.toBe(undefined)
+
+  await $.turn.complete({ ...TURN, turnId: 't4' })
+  await clock.advance(0)
+  expect(judgements()).toBe(2)
+  expect(forks.at(-1)).toContain('제안을 거절하고 기존 목표를 유지')
   await ui.unmount()
 })

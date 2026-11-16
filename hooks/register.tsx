@@ -101,16 +101,41 @@ const judgePrompt = (target: Goal) =>
     target.isRejected
       ? '사용자가 이전의 달성 판정을 거부했습니다. 그 이후의 새 근거가 있을 때만 MET입니다.'
       : '',
-    '첫 줄에 `MET: <한 문장 근거>` 또는 `NOT_MET: <한 문장 근거>`만 쓰세요.',
+    '대화의 작업이 이 목표에서 분명히 벗어나 다른 목표로 옮겨 갔다면 목표 변경을 제안할 수 있습니다.',
+    '범위를 조금 넓히거나 세부 단계를 진행하는 정도는 변경이 아닙니다.',
+    target.keptAgainst
+      ? `사용자는 "${target.keptAgainst}"(으)로 바꾸자는 제안을 거절하고 기존 목표를 유지했습니다. 그 뒤로 방향이 또 바뀐 근거가 있을 때만 제안하세요.`
+      : '',
+    '첫 줄에 다음 셋 중 하나만 쓰세요.',
+    '`MET: <한 문장 근거>`',
+    '`NOT_MET: <한 문장 근거>`',
+    '`CHANGE: <새 목표와 완료 조건을 담은 한 문장>` (둘째 줄에 `REASON: <한 문장 근거>`)',
   ]
     .filter(Boolean)
     .join('\n')
 
-const parseMet = (reply: string) => {
-  const line = reply.trim().split('\n')[0] ?? ''
-  const match = /^MET\s*:\s*(.+)$/.exec(line)
+export type Verdict =
+  | { kind: 'met'; reason: string }
+  | { kind: 'change'; text: string; reason: string }
+  | { kind: 'none' }
 
-  return match?.[1]?.trim() ?? null
+export const parseVerdict = (reply: string): Verdict => {
+  const [line = '', second = ''] = reply.trim().split('\n')
+  const met = /^MET\s*:\s*(.+)$/.exec(line)?.[1]?.trim()
+
+  if (met) {
+    return { kind: 'met', reason: met }
+  }
+
+  const change = /^CHANGE\s*:\s*(.+)$/.exec(line)?.[1]?.trim()
+
+  if (change) {
+    const reason = /^REASON\s*:\s*(.+)$/.exec(second.trim())?.[1]?.trim()
+
+    return { kind: 'change', text: change, reason: reason ?? '' }
+  }
+
+  return { kind: 'none' }
 }
 
 const judge = async ($: EngineInterface, target: Goal) => {
@@ -120,17 +145,25 @@ const judge = async ($: EngineInterface, target: Goal) => {
     return
   }
 
-  const reason = parseMet(reply.text)
+  const verdict = parseVerdict(reply.text)
+  const isSameActive = (current: Goal | null): current is Goal =>
+    current?.text === target.text && current.status === 'active'
 
-  if (reason === null) {
-    return
+  if (verdict.kind === 'met') {
+    await changeGoal($, current =>
+      isSameActive(current)
+        ? { ...current, status: 'met' as const, reason: verdict.reason, proposal: undefined }
+        : current,
+    )
   }
 
-  await changeGoal($, current =>
-    current?.text === target.text && current.status === 'active'
-      ? { ...current, status: 'met' as const, reason }
-      : current,
-  )
+  if (verdict.kind === 'change' && verdict.text !== target.text) {
+    await changeGoal($, current =>
+      isSameActive(current)
+        ? { ...current, proposal: { text: verdict.text, reason: verdict.reason } }
+        : current,
+    )
+  }
 }
 
 const suggestPrompt = [
@@ -322,7 +355,13 @@ export const register: Register = on => {
 
     const current = await read($, goal)
 
-    if (e.reason === 'answer' && current?.status === 'active') {
+    // While a change proposal waits for the person, judging again would only
+    // spend a model call on a band they have not answered yet.
+    if (
+      e.reason === 'answer' &&
+      current?.status === 'active' &&
+      current.proposal === undefined
+    ) {
       void $.clock.after(0, () => {
         void judge($, current)
       })
@@ -493,6 +532,40 @@ export const register: Register = on => {
                 status: 'active' as const,
                 isRejected: true,
               }))
+            }
+          />,
+        ],
+      })
+    }
+
+    if (current.proposal !== undefined) {
+      const proposal = current.proposal
+
+      return card({
+        key: 'card-proposal',
+        tone: 'warning',
+        badge: '⇄ 목표 변경 제안',
+        title: proposal.text,
+        note: [`기존 목표: ${current.text}`, proposal.reason]
+          .filter(Boolean)
+          .join('\n'),
+        buttons: [
+          <Button
+            key="change-goal"
+            variant="primary"
+            label="목표 변경"
+            onPress={() => setGoal($, proposal.text)}
+          />,
+          <Button
+            key="keep-goal"
+            variant="secondary"
+            label="기존 목표 유지"
+            onPress={() =>
+              changeGoal($, latest =>
+                latest === null
+                  ? latest
+                  : { ...latest, proposal: undefined, keptAgainst: proposal.text },
+              )
             }
           />,
         ],
