@@ -89,8 +89,14 @@ const restore = async ($: EngineInterface) => {
   }
 }
 
-const titleOf = (text: string) =>
-  text.length > 40 ? `${text.slice(0, 40)}…` : text
+// The sidebar shows only the first ~20 characters of a title, so Claude
+// writes a short label instead of the goal sentence cut at a fixed length.
+const TITLE_RULES = [
+  '제목 규칙: 접두어 뒤는 18자 이내의 명사구로 쓰세요. 사이드바는 앞 20자 정도만 보여 줍니다.',
+  '- 다른 세션과 구별되는 말(티켓 번호, 대상·서비스 이름, 핵심 동작)을 맨 앞에 두세요.',
+  '- 완료 조건, 배경 설명, "~에서", "~하도록", 문장 어미는 빼세요.',
+  '- 예: "PL-33567 팝업 vs 애드링크 판정", "홈코 오픈 알림 푸시 문구", "HT Home Life 폰트 적용".',
+].join('\n')
 
 const judgePrompt = (target: Goal) =>
   [
@@ -212,8 +218,9 @@ const setGoal = async ($: EngineInterface, text: string) => {
   askClaude(
     $,
     [
-      `세션 목표가 설정됐습니다: ${text}`,
-      `mcp__ccd_session_mgmt__set_session_title로 이 세션(session_id "self")의 제목을 "목표: ${titleOf(text)}"로 바꾸세요.`,
+      `새 세션 목표: ${text}`,
+      'mcp__ccd_session_mgmt__set_session_title로 이 세션(session_id "self")의 제목을 "목표: <짧은 제목>"으로 바꾸세요.',
+      TITLE_RULES,
       '제목 변경 외의 작업은 시작하지 말고, 한 문장으로만 답하세요.',
     ].join('\n'),
   )
@@ -234,7 +241,9 @@ const finishGoal = async (
     $,
     [
       `세션 목표가 완료 처리됐습니다: ${target.text}`,
-      `1. mcp__ccd_session_mgmt__set_session_title로 이 세션(session_id "self")의 제목을 "[완료] ${titleOf(target.text)}"로 바꾸세요.`,
+      '1. mcp__ccd_session_mgmt__set_session_title로 이 세션(session_id "self")의 제목을 "[완료] <짧은 제목>"으로 바꾸세요.',
+      '   지금 제목이 "목표: X"이면 X를 그대로 쓰고, 아니면 아래 규칙으로 새로 지으세요.',
+      TITLE_RULES.replace(/^/gm, '   '),
       '2. 다음 세션에 넘길 일이 있으면, 새 세션의 첫 메시지로 그대로 쓸 인계 프롬프트를 ```handoff 코드 블록 하나에 쓰세요.',
       '   이 대화를 못 본 사람도 이해하게 남은 일·관련 파일·결정 사항·끝난 상태를 담고, 넘길 일이 없으면 블록을 쓰지 마세요.',
       '새 세션은 입력창 위 띠가 인계 프롬프트를 채워 엽니다. new_session 액션은 쓰지 마세요.',

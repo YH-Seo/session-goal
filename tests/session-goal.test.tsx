@@ -111,6 +111,8 @@ test('setting a goal asks for the title and skips judging that turn', async ($, 
   const { clock, prompts, judgements } = await setUp($, on, 'MET: fixed')
 
   expect(prompts[0]).toContain('목표: 로그인 버그 수정')
+  expect(prompts[0]).toContain('18자 이내')
+  expect(prompts[0]).not.toContain('목표: 로그인 버그 수정"')
   await $.turn.complete(TURN)
   await clock.advance(0)
   expect(judgements()).toBe(0)
