@@ -31,6 +31,8 @@ When a session has no goal, the first answered turn makes one extra model call t
 
 After each answered turn, one extra model call reads the conversation and judges the goal. When it looks met, the band above the prompt shows the reason with three buttons: finish and open a new session, finish only, or reject the verdict. After finishing only, the band keeps a button to open the new session later.
 
+When the work has clearly moved away from the goal, the same judgement can recommend a different goal instead. The band then shows the proposed goal next to the current one with two buttons: change the goal, or keep the current one. While the proposal waits for an answer, no further judgement runs. After you keep the goal, the next judgements are told so and propose again only on new evidence.
+
 When you finish, Claude writes a handoff prompt in a ```` ```handoff ```` block. The new session opens with that prompt already in its input box (`claude://code/new?q=...`), so you only press send. With no block, the new session opens empty.
 
 ## Across restarts
