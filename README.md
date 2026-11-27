@@ -22,7 +22,7 @@ claude plugin install session-goal --marketplace YH-Seo/session-goal
 
 | Command | What it does |
 | --- | --- |
-| `/session-goal <goal and done condition>` | Sets the goal and renames the session to `목표: ...` |
+| `/session-goal <goal and done condition>` | Sets the goal and renames the session to `목표: ...` without a chat turn (falls back to asking Claude) |
 | `/session-goal` | Shows the current goal |
 | `/session-goal clear` | Clears the goal |
 | `/session-done` | Marks the goal done and renames the session to `[완료] ...` |

@@ -249,19 +249,76 @@ const askClaude = ($: EngineInterface, text: string) => {
   })
 }
 
+const SET_TITLE_TOOL = 'mcp__ccd_session_mgmt__set_session_title'
+const GOAL_PREFIX = '목표: '
+// A little over the 18 the rules ask for, so a near miss is kept as written.
+const MAX_TITLE_LENGTH = 24
+
+const titlePrompt = (text: string) =>
+  [
+    '아래 세션 목표로 사이드바 제목을 지으세요. 제목만 한 줄로 쓰고, 접두어·따옴표·설명은 붙이지 마세요.',
+    TITLE_RULES,
+    `세션 목표: ${text}`,
+  ].join('\n')
+
+export const parseTitle = (reply: string) => {
+  const title = (reply.trim().split('\n')[0] ?? '')
+    .trim()
+    .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
+    .replace(/^목표\s*:\s*/, '')
+    .trim()
+
+  return title === '' || title.length > MAX_TITLE_LENGTH ? null : title
+}
+
+// Names the session without a conversation turn: a side completion writes the
+// title and the plugin calls the app's rename tool itself. False when either
+// step fails, so the caller can fall back to asking Claude.
+const renameSession = async ($: EngineInterface, text: string) => {
+  try {
+    const reply = await $.model.complete({
+      model: 'haiku',
+      prompt: titlePrompt(text),
+      maxTokens: 100,
+    })
+    const title = reply.isAnswered ? parseTitle(reply.text) : null
+
+    if (title === null) {
+      return false
+    }
+
+    const result = await $.tool.call({
+      tool: SET_TITLE_TOOL,
+      session_id: 'self',
+      title: `${GOAL_PREFIX}${title}`,
+    })
+
+    return result.deny === undefined && result.isError !== true
+  } catch {
+    return false
+  }
+}
+
 const setGoal = async ($: EngineInterface, text: string) => {
   await changeGoal($, () => ({ text, status: 'active' }))
   await update($, suggestion, () => null)
-  await update($, skipNextJudgement, () => true)
-  askClaude(
-    $,
-    [
-      `새 세션 목표: ${text}`,
-      'mcp__ccd_session_mgmt__set_session_title로 이 세션(session_id "self")의 제목을 "목표: <짧은 제목>"으로 바꾸세요.',
-      TITLE_RULES,
-      '제목 변경 외의 작업은 시작하지 말고, 한 문장으로만 답하세요.',
-    ].join('\n'),
-  )
+  // A command.run hook must not wait on the model; rename once it returns.
+  void $.clock.after(0, async () => {
+    if (await renameSession($, text)) {
+      return
+    }
+
+    await update($, skipNextJudgement, () => true)
+    askClaude(
+      $,
+      [
+        `새 세션 목표: ${text}`,
+        `${SET_TITLE_TOOL}로 이 세션(session_id "self")의 제목을 "${GOAL_PREFIX}<짧은 제목>"으로 바꾸세요.`,
+        TITLE_RULES,
+        '제목 변경 외의 작업은 시작하지 말고, 한 문장으로만 답하세요.',
+      ].join('\n'),
+    )
+  })
 }
 
 const finishGoal = async (
