@@ -32,8 +32,27 @@ const setUp = async (
   {
     withGoal = true,
     stored = {},
-  }: { withGoal?: boolean; stored?: Record<string, unknown> } = {},
+    rename,
+  }: {
+    withGoal?: boolean
+    stored?: Record<string, unknown>
+    /** The side model's title reply, and whether the rename tool refuses. */
+    rename?: { reply: string; isDenied?: boolean }
+  } = {},
 ) => {
+  const renames: unknown[] = []
+
+  if (rename) {
+    on('model.complete', () => ({
+      value: { isAnswered: true, text: rename.reply, usage: USAGE },
+    }))
+    on('tool.call', (_, e) => {
+      renames.push(e)
+
+      return rename.isDenied ? { deny: 'not allowed' } : { result: {} }
+    })
+  }
+
   const clock = mock.clock(on)
   // The test's own store, so a test can look at what the plugin left in it.
   const store = new Map<string, unknown>(Object.entries(stored))
@@ -106,6 +125,7 @@ const setUp = async (
     store,
     clock,
     prompts,
+    renames,
     judgements: () => judgements,
     forks,
     answerWith: (text: string) => {
@@ -130,6 +150,44 @@ test('setting a goal asks for the title and skips judging that turn', async ($, 
   await $.turn.complete(TURN)
   await clock.advance(0)
   expect(judgements()).toBe(0)
+})
+
+test('setting a goal renames the session itself, with no turn, and judges the next one', async ($, on) => {
+  const { clock, prompts, renames, judgements } = await setUp($, on, 'NOT_MET: x', {
+    rename: { reply: '"목표: 로그인 버그 수정"\n설명' },
+  })
+
+  expect(renames.length).toBe(1)
+  expect(renames[0]).toMatchObject({
+    tool: 'mcp__ccd_session_mgmt__set_session_title',
+    session_id: 'self',
+    title: '목표: 로그인 버그 수정',
+  })
+  expect(prompts).toEqual([])
+  await $.turn.complete(TURN)
+  await clock.advance(0)
+  expect(judgements()).toBe(1)
+})
+
+test('a refused rename falls back to asking Claude', async ($, on) => {
+  const { clock, prompts, renames, judgements } = await setUp($, on, 'MET: fixed', {
+    rename: { reply: '로그인 버그 수정', isDenied: true },
+  })
+
+  expect(renames.length).toBe(1)
+  expect(prompts[0]).toContain('18자 이내')
+  await $.turn.complete(TURN)
+  await clock.advance(0)
+  expect(judgements()).toBe(0)
+})
+
+test('a title reply that is empty or too long is not used', async ($, on) => {
+  const { prompts, renames } = await setUp($, on, 'MET: fixed', {
+    rename: { reply: '이 세션은 로그인 화면에서 발생하는 버그를 고치고 테스트까지 마치는 것이 목표입니다' },
+  })
+
+  expect(renames).toEqual([])
+  expect(prompts[0]).toContain('18자 이내')
 })
 
 test('a MET verdict offers a new session and starts no work', async ($, on) => {
